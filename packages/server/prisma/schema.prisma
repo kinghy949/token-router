@@ -1,0 +1,64 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String        @id @default(uuid()) @db.Char(36)
+  email        String        @unique @db.VarChar(255)
+  passwordHash String        @map("password_hash") @db.VarChar(255)
+  isAdmin      Boolean       @default(false) @map("is_admin")
+  isActive     Boolean       @default(true) @map("is_active")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  apiKeys      ApiKey[]
+  balance      Balance?
+  transactions Transaction[]
+
+  @@map("users")
+}
+
+model ApiKey {
+  id         String    @id @default(uuid()) @db.Char(36)
+  userId     String    @map("user_id") @db.Char(36)
+  keyHash    String    @unique @map("key_hash") @db.VarChar(255)
+  keyPrefix  String    @map("key_prefix") @db.VarChar(20)
+  name       String?   @db.VarChar(100)
+  isActive   Boolean   @default(true) @map("is_active")
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_api_keys_user_id")
+  @@index([keyHash], map: "idx_api_keys_key_hash")
+  @@map("api_keys")
+}
+
+model Balance {
+  userId    String   @id @map("user_id") @db.Char(36)
+  tokens    BigInt   @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("balances")
+}
+
+model Transaction {
+  id           String   @id @default(uuid()) @db.Char(36)
+  userId       String   @map("user_id") @db.Char(36)
+  type         String   @db.VarChar(50)
+  amount       BigInt
+  balanceAfter BigInt   @map("balance_after")
+  refId        String?  @map("ref_id") @db.Char(36)
+  description  String?  @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_transactions_user_id")
+  @@index([createdAt], map: "idx_transactions_created_at")
+  @@map("transactions")
+}
