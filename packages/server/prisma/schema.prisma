@@ -18,6 +18,7 @@ model User {
   apiKeys      ApiKey[]
   balance      Balance?
   transactions Transaction[]
+  usageLogs     UsageLog[]
   createdCodes RedeemCode[]  @relation("RedeemCodeCreatedBy")
   redeemedCodes RedeemCode[] @relation("RedeemCodeRedeemedBy")
 
@@ -34,6 +35,7 @@ model ApiKey {
   lastUsedAt DateTime? @map("last_used_at")
   createdAt  DateTime  @default(now()) @map("created_at")
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usageLogs  UsageLog[]
 
   @@index([userId], map: "idx_api_keys_user_id")
   @@index([keyHash], map: "idx_api_keys_key_hash")
@@ -77,4 +79,25 @@ model RedeemCode {
   redeemedByUser User?     @relation("RedeemCodeRedeemedBy", fields: [redeemedBy], references: [id], onDelete: SetNull)
 
   @@map("redeem_codes")
+}
+
+model UsageLog {
+  id           String   @id @default(uuid()) @db.Char(36)
+  userId       String   @map("user_id") @db.Char(36)
+  apiKeyId     String?  @map("api_key_id") @db.Char(36)
+  model        String   @db.VarChar(100)
+  inputTokens  Int      @default(0) @map("input_tokens")
+  outputTokens Int      @default(0) @map("output_tokens")
+  totalCost    BigInt   @default(0) @map("total_cost")
+  provider     String   @db.VarChar(50)
+  upstreamStatus Int?   @map("upstream_status")
+  durationMs   Int?     @map("duration_ms")
+  errorMessage String?  @map("error_message") @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apiKey       ApiKey?  @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([userId], map: "idx_usage_logs_user_id")
+  @@index([createdAt], map: "idx_usage_logs_created_at")
+  @@map("usage_logs")
 }

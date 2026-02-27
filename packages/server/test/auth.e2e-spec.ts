@@ -47,4 +47,37 @@ describe('Auth (e2e)', () => {
 
     expect(me.body.email).toBe('u@test.com');
   });
+
+  it('updates password with correct old password', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email: 'pwd@test.com', password: 'secret123' })
+      .expect(201);
+
+    const login = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'pwd@test.com', password: 'secret123' })
+      .expect(201);
+
+    const token = login.body.access_token as string;
+
+    await request(app.getHttpServer())
+      .put('/auth/password')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        oldPassword: 'secret123',
+        newPassword: 'newsecret123',
+      })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'pwd@test.com', password: 'secret123' })
+      .expect(401);
+
+    await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'pwd@test.com', password: 'newsecret123' })
+      .expect(201);
+  });
 });

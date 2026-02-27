@@ -57,6 +57,7 @@ async function grantTokens(app: INestApplication, userToken: string, tokenAmount
 describe('Proxy (e2e)', () => {
   let app: INestApplication;
   let fetchSpy: jest.SpiedFunction<typeof fetch>;
+  let fakePrisma: FakePrismaService;
 
   beforeAll(async () => {
     process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
@@ -64,12 +65,13 @@ describe('Proxy (e2e)', () => {
     process.env.INPUT_TOKEN_PRICE = '1';
     process.env.OUTPUT_TOKEN_PRICE = '5';
     fetchSpy = jest.spyOn(global, 'fetch');
+    fakePrisma = new FakePrismaService();
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     })
       .overrideProvider(PrismaService)
-      .useValue(new FakePrismaService())
+      .useValue(fakePrisma)
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -85,7 +87,7 @@ describe('Proxy (e2e)', () => {
     await app.close();
   });
 
-  it('forwards non-stream message to anthropic', async () => {
+  it('forwards non-stream message to anthropic and settles by actual usage', async () => {
     const { apiKey, userToken } = await createApiKey(app, 'proxy-user-1@test.com');
     await grantTokens(app, userToken, 2000);
 
@@ -112,7 +114,7 @@ describe('Proxy (e2e)', () => {
       .send({
         model: 'claude-3-5-sonnet-20241022',
         messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 16,
+        max_tokens: 2000,
       })
       .expect(200);
 
@@ -125,6 +127,13 @@ describe('Proxy (e2e)', () => {
       .expect(200);
 
     expect(balance.body.tokens).toBe(1994);
+
+    const state = fakePrisma.inspectState();
+    const usageLog = state.usageLogs[state.usageLogs.length - 1];
+    expect(usageLog).toBeTruthy();
+    expect(usageLog.totalCost).toBe(BigInt(6));
+    expect(usageLog.upstreamStatus).toBe(200);
+    expect(usageLog.errorMessage).toBeNull();
   });
 
   it('returns 402 when balance is insufficient for precharge', async () => {
@@ -153,7 +162,8 @@ describe('Proxy (e2e)', () => {
       start(controller) {
         controller.enqueue(
           encoder.encode(
-            'event: message_start\ndata: {"type":"message_start"}\n\n' +
+            'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":10}}}\n\n' +
+              'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":5}}\n\n' +
               'event: message_stop\ndata: {"type":"message_stop"}\n\n',
           ),
         );
@@ -175,7 +185,7 @@ describe('Proxy (e2e)', () => {
       .send({
         model: 'claude-3-5-sonnet-20241022',
         messages: [{ role: 'user', content: 'hi' }],
-        max_tokens: 16,
+        max_tokens: 2000,
         stream: true,
       })
       .expect(200)
@@ -191,5 +201,46 @@ describe('Proxy (e2e)', () => {
       .expect(200);
 
     expect(balance.body.tokens).toBe(1994);
+  });
+
+  it('refunds full hold when upstream returns error response', async () => {
+    const { apiKey, userToken } = await createApiKey(app, 'proxy-user-4@test.com');
+    await grantTokens(app, userToken, 2000);
+
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: { type: 'api_error', message: '上游繁忙' },
+        }),
+        {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+
+    await request(app.getHttpServer())
+      .post('/v1/messages')
+      .set('x-api-key', apiKey)
+      .set('anthropic-version', '2023-06-01')
+      .send({
+        model: 'claude-3-5-sonnet-20241022',
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 16,
+      })
+      .expect(500);
+
+    const balance = await request(app.getHttpServer())
+      .get('/balance')
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200);
+    expect(balance.body.tokens).toBe(2000);
+
+    const state = fakePrisma.inspectState();
+    const usageLog = state.usageLogs[state.usageLogs.length - 1];
+    expect(usageLog).toBeTruthy();
+    expect(usageLog.totalCost).toBe(BigInt(0));
+    expect(usageLog.upstreamStatus).toBe(500);
+    expect(usageLog.errorMessage).toContain('上游繁忙');
   });
 });

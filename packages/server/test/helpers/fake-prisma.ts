@@ -23,12 +23,14 @@ export class FakePrismaService {
   private apiKeys: any[] = [];
   private redeemCodes: any[] = [];
   private transactions: any[] = [];
+  private usageLogs: any[] = [];
 
   user: any = {};
   balance: any = {};
   apiKey: any = {};
   redeemCode: any = {};
   transaction: any = {};
+  usageLog: any = {};
 
   constructor() {
     this.user.findUnique = async ({ where, select }: any) => {
@@ -58,6 +60,21 @@ export class FakePrismaService {
       };
       this.users.push(user);
       return user;
+    };
+
+    this.user.update = async ({ where, data }: any) => {
+      const idx = this.users.findIndex((u) => u.id === where.id);
+      if (idx < 0) {
+        throw new Error('用户不存在');
+      }
+
+      const next = {
+        ...this.users[idx],
+        ...data,
+        updatedAt: new Date(),
+      };
+      this.users[idx] = next;
+      return next;
     };
 
     this.balance.create = async ({ data }: any) => {
@@ -144,9 +161,66 @@ export class FakePrismaService {
       return apiKey;
     };
 
+    this.apiKey.update = async ({ where, data, select }: any) => {
+      const idx = this.apiKeys.findIndex((k) => k.id === where.id);
+      if (idx < 0) {
+        throw new Error('API Key 不存在');
+      }
+
+      const next = {
+        ...this.apiKeys[idx],
+        ...data,
+      };
+      this.apiKeys[idx] = next;
+      return applySelect(next, select);
+    };
+
+    this.apiKey.delete = async ({ where }: any) => {
+      const idx = this.apiKeys.findIndex((k) => k.id === where.id);
+      if (idx < 0) {
+        throw new Error('API Key 不存在');
+      }
+
+      const removed = this.apiKeys[idx];
+      this.apiKeys.splice(idx, 1);
+      return removed;
+    };
+
     this.redeemCode.findUnique = async ({ where }: any) => {
       const code = this.redeemCodes.find((c) => c.code === where.code);
       return code ?? null;
+    };
+
+    this.redeemCode.findMany = async ({ where, orderBy, skip, take }: any) => {
+      let list = this.redeemCodes.filter((item) => {
+        if (where?.redeemedBy === null && item.redeemedBy !== null) {
+          return false;
+        }
+        if (where?.redeemedBy?.not === null && item.redeemedBy === null) {
+          return false;
+        }
+        return true;
+      });
+
+      if (orderBy?.createdAt === 'desc') {
+        list = list.sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+      }
+
+      const start = Number(skip ?? 0);
+      const end = take !== undefined ? start + Number(take) : undefined;
+      return list.slice(start, end);
+    };
+
+    this.redeemCode.count = async ({ where }: any) => {
+      return this.redeemCodes.filter((item) => {
+        if (where?.redeemedBy === null && item.redeemedBy !== null) {
+          return false;
+        }
+        if (where?.redeemedBy?.not === null && item.redeemedBy === null) {
+          return false;
+        }
+        return true;
+      }).length;
     };
 
     this.redeemCode.create = async ({ data }: any) => {
@@ -191,6 +265,100 @@ export class FakePrismaService {
       this.transactions.push(item);
       return item;
     };
+
+    this.transaction.findMany = async ({ where, orderBy, skip, take }: any) => {
+      let list = this.transactions.filter((item) => {
+        if (where?.userId && item.userId !== where.userId) {
+          return false;
+        }
+        return true;
+      });
+
+      if (orderBy?.createdAt === 'desc') {
+        list = list.sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+      }
+
+      const start = Number(skip ?? 0);
+      const end = take !== undefined ? start + Number(take) : undefined;
+      return list.slice(start, end);
+    };
+
+    this.transaction.count = async ({ where }: any) => {
+      return this.transactions.filter((item) => {
+        if (where?.userId && item.userId !== where.userId) {
+          return false;
+        }
+        return true;
+      }).length;
+    };
+
+    this.usageLog.create = async ({ data }: any) => {
+      const item = {
+        id: randomUUID(),
+        userId: data.userId,
+        apiKeyId: data.apiKeyId ?? null,
+        model: data.model,
+        inputTokens: data.inputTokens ?? 0,
+        outputTokens: data.outputTokens ?? 0,
+        totalCost: data.totalCost ?? BigInt(0),
+        provider: data.provider,
+        upstreamStatus: data.upstreamStatus ?? null,
+        durationMs: data.durationMs ?? null,
+        errorMessage: data.errorMessage ?? null,
+        createdAt: new Date(),
+      };
+      this.usageLogs.push(item);
+      return item;
+    };
+
+    this.usageLog.findMany = async ({ where, orderBy, skip, take, select }: any) => {
+      let list = this.usageLogs.filter((item) => {
+        if (where?.userId && item.userId !== where.userId) {
+          return false;
+        }
+
+        if (where?.model && item.model !== where.model) {
+          return false;
+        }
+
+        if (where?.createdAt?.gte && Number(item.createdAt) < Number(where.createdAt.gte)) {
+          return false;
+        }
+
+        if (where?.createdAt?.lte && Number(item.createdAt) > Number(where.createdAt.lte)) {
+          return false;
+        }
+
+        return true;
+      });
+
+      if (orderBy?.createdAt === 'desc') {
+        list = list.sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+      }
+
+      const start = Number(skip ?? 0);
+      const end = take !== undefined ? start + Number(take) : undefined;
+      const paged = list.slice(start, end);
+      return paged.map((item) => applySelect(item, select));
+    };
+
+    this.usageLog.count = async ({ where }: any) => {
+      return this.usageLogs.filter((item) => {
+        if (where?.userId && item.userId !== where.userId) {
+          return false;
+        }
+        if (where?.model && item.model !== where.model) {
+          return false;
+        }
+        if (where?.createdAt?.gte && Number(item.createdAt) < Number(where.createdAt.gte)) {
+          return false;
+        }
+        if (where?.createdAt?.lte && Number(item.createdAt) > Number(where.createdAt.lte)) {
+          return false;
+        }
+        return true;
+      }).length;
+    };
   }
 
   async $transaction(arg: any) {
@@ -198,5 +366,16 @@ export class FakePrismaService {
       return arg(this);
     }
     return Promise.all(arg);
+  }
+
+  inspectState() {
+    return {
+      users: [...this.users],
+      balances: [...this.balances],
+      apiKeys: [...this.apiKeys],
+      redeemCodes: [...this.redeemCodes],
+      transactions: [...this.transactions],
+      usageLogs: [...this.usageLogs],
+    };
   }
 }

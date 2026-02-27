@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
+import { UpdateApiKeyDto } from './dto/update-api-key.dto';
 
 @Injectable()
 export class ApiKeyService {
@@ -49,5 +50,54 @@ export class ApiKeyService {
     });
 
     return { items };
+  }
+
+  async updateApiKey(userId: string, id: string, dto: UpdateApiKeyDto) {
+    const existed = await this.prisma.apiKey.findUnique({ where: { id } });
+    if (!existed || existed.userId !== userId) {
+      throw new NotFoundException('API Key 不存在');
+    }
+
+    const data: { name?: string | null; isActive?: boolean } = {};
+    if (dto.name !== undefined) {
+      data.name = dto.name.trim() || null;
+    }
+    if (dto.isActive !== undefined) {
+      data.isActive = dto.isActive;
+    }
+
+    const updated =
+      Object.keys(data).length > 0
+        ? await this.prisma.apiKey.update({
+            where: { id },
+            data,
+            select: {
+              id: true,
+              keyPrefix: true,
+              name: true,
+              isActive: true,
+              lastUsedAt: true,
+              createdAt: true,
+            },
+          })
+        : {
+            id: existed.id,
+            keyPrefix: existed.keyPrefix,
+            name: existed.name,
+            isActive: existed.isActive,
+            lastUsedAt: existed.lastUsedAt,
+            createdAt: existed.createdAt,
+          };
+
+    return updated;
+  }
+
+  async deleteApiKey(userId: string, id: string) {
+    const existed = await this.prisma.apiKey.findUnique({ where: { id } });
+    if (!existed || existed.userId !== userId) {
+      throw new NotFoundException('API Key 不存在');
+    }
+
+    await this.prisma.apiKey.delete({ where: { id } });
   }
 }

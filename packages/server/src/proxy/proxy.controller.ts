@@ -2,9 +2,15 @@ import { Body, Controller, Headers, Post, Res, UseGuards } from '@nestjs/common'
 import type { Response as ExpressResponse } from 'express';
 import { CurrentApiKey } from '../common/decorators/current-api-key.decorator';
 import { ApiKeyGuard } from '../common/guards/api-key.guard';
-import { BillingService } from '../billing/billing.service';
+import { BillingService, MessageUsage } from '../billing/billing.service';
 import { ClaudeRequest, ProviderRequest } from '../providers/provider-adapter.interface';
 import { ProxyService } from './proxy.service';
+
+interface UpstreamWriteResult {
+  usage: MessageUsage | null;
+  errorMessage: string | null;
+  upstreamStatus: number;
+}
 
 @Controller('v1')
 export class ProxyController {
@@ -21,9 +27,48 @@ export class ProxyController {
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Res() response: ExpressResponse,
   ) {
-    await this.billingService.reserveForMessage(apiKeyCtx.userId, body);
-    const upstreamResponse = await this.proxyService.forwardMessage(body, headers);
-    await this.writeUpstreamResponse(upstreamResponse, response);
+    const startedAt = Date.now();
+    const hold = await this.billingService.reserveForMessage(apiKeyCtx.userId, body);
+    const settlementBase = {
+      userId: apiKeyCtx.userId,
+      apiKeyId: apiKeyCtx.apiKeyId,
+      model: typeof body.model === 'string' && body.model.trim().length > 0 ? body.model : 'unknown',
+      provider: 'anthropic',
+      holdAmount: hold.holdAmount,
+      durationMs: Date.now() - startedAt,
+    };
+
+    let upstreamResponse: Response;
+    try {
+      upstreamResponse = await this.proxyService.forwardMessage(body, headers);
+    } catch (error) {
+      await this.safeRefundMessageHold({
+        ...settlementBase,
+        upstreamStatus: null,
+        errorMessage: this.extractThrownErrorMessage(error),
+      });
+      throw error;
+    }
+
+    let writeResult: UpstreamWriteResult;
+    try {
+      writeResult = await this.writeUpstreamResponse(upstreamResponse, response);
+    } catch (error) {
+      await this.safeRefundMessageHold({
+        ...settlementBase,
+        upstreamStatus: upstreamResponse.status,
+        errorMessage: this.extractThrownErrorMessage(error),
+      });
+      throw error;
+    }
+
+    await this.safeSettleMessage({
+      ...settlementBase,
+      usage: writeResult.usage,
+      upstreamStatus: writeResult.upstreamStatus,
+      errorMessage: writeResult.errorMessage,
+      durationMs: Date.now() - startedAt,
+    });
   }
 
   @Post('messages/count_tokens')
@@ -37,7 +82,10 @@ export class ProxyController {
     await this.writeUpstreamResponse(upstreamResponse, response);
   }
 
-  private async writeUpstreamResponse(upstreamResponse: globalThis.Response, response: ExpressResponse) {
+  private async writeUpstreamResponse(
+    upstreamResponse: globalThis.Response,
+    response: ExpressResponse,
+  ): Promise<UpstreamWriteResult> {
     response.status(upstreamResponse.status);
 
     upstreamResponse.headers.forEach((value, key) => {
@@ -55,6 +103,8 @@ export class ProxyController {
     const contentType = upstreamResponse.headers.get('content-type') || '';
 
     if (contentType.includes('text/event-stream')) {
+      const decoder = new TextDecoder();
+      let streamText = '';
       if (upstreamResponse.body) {
         const reader = upstreamResponse.body.getReader();
         while (true) {
@@ -62,24 +112,218 @@ export class ProxyController {
           if (done) {
             break;
           }
+          streamText += decoder.decode(value, { stream: true });
           response.write(Buffer.from(value));
         }
+        streamText += decoder.decode();
       }
       response.end();
-      return;
+
+      return {
+        usage: this.extractUsageFromSse(streamText),
+        errorMessage: upstreamResponse.ok ? null : this.extractErrorFromSse(streamText),
+        upstreamStatus: upstreamResponse.status,
+      };
     }
 
     const text = await upstreamResponse.text();
+    const parsedPayload = this.tryParseJson(text);
     if (contentType.includes('application/json')) {
-      try {
-        response.send(JSON.parse(text));
-        return;
-      } catch {
+      if (parsedPayload !== null) {
+        response.send(parsedPayload);
+      } else {
         response.send(text);
-        return;
+      }
+    } else {
+      response.send(text);
+    }
+
+    return {
+      usage: this.extractUsageFromPayload(parsedPayload),
+      errorMessage: this.extractErrorMessageFromPayload(parsedPayload, text, upstreamResponse.status),
+      upstreamStatus: upstreamResponse.status,
+    };
+  }
+
+  private tryParseJson(text: string): Record<string, unknown> | null {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private extractUsageFromPayload(payload: Record<string, unknown> | null): MessageUsage | null {
+    if (!payload) {
+      return null;
+    }
+
+    const candidates: unknown[] = [payload['usage']];
+    if (payload['message'] && typeof payload['message'] === 'object') {
+      candidates.push((payload['message'] as Record<string, unknown>)['usage']);
+    }
+    if (payload['delta'] && typeof payload['delta'] === 'object') {
+      candidates.push((payload['delta'] as Record<string, unknown>)['usage']);
+    }
+
+    for (const candidate of candidates) {
+      const usage = this.parseUsageObject(candidate);
+      if (usage) {
+        return usage;
       }
     }
 
-    response.send(text);
+    return null;
+  }
+
+  private extractUsageFromSse(streamText: string): MessageUsage | null {
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let found = false;
+
+    for (const line of streamText.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) {
+        continue;
+      }
+
+      const rawData = trimmed.slice(5).trim();
+      if (!rawData || rawData === '[DONE]') {
+        continue;
+      }
+
+      const payload = this.tryParseJson(rawData);
+      const usage = this.extractUsageFromPayload(payload);
+      if (!usage) {
+        continue;
+      }
+
+      found = true;
+      inputTokens = Math.max(inputTokens, usage.inputTokens);
+      outputTokens = Math.max(outputTokens, usage.outputTokens);
+    }
+
+    if (!found) {
+      return null;
+    }
+
+    return {
+      inputTokens,
+      outputTokens,
+    };
+  }
+
+  private parseUsageObject(value: unknown): MessageUsage | null {
+    if (!value || typeof value !== 'object') {
+      return null;
+    }
+
+    const usage = value as Record<string, unknown>;
+    const hasInput = usage['input_tokens'] !== undefined || usage['inputTokens'] !== undefined;
+    const hasOutput = usage['output_tokens'] !== undefined || usage['outputTokens'] !== undefined;
+    if (!hasInput && !hasOutput) {
+      return null;
+    }
+
+    return {
+      inputTokens: this.toNonNegativeInt(usage['input_tokens'] ?? usage['inputTokens']),
+      outputTokens: this.toNonNegativeInt(usage['output_tokens'] ?? usage['outputTokens']),
+    };
+  }
+
+  private extractErrorFromSse(streamText: string): string | null {
+    for (const line of streamText.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) {
+        continue;
+      }
+
+      const rawData = trimmed.slice(5).trim();
+      if (!rawData || rawData === '[DONE]') {
+        continue;
+      }
+
+      const payload = this.tryParseJson(rawData);
+      const message = this.extractErrorMessageFromPayload(payload, rawData, 500);
+      if (message) {
+        return message;
+      }
+    }
+
+    return null;
+  }
+
+  private extractErrorMessageFromPayload(
+    payload: Record<string, unknown> | null,
+    rawText: string,
+    upstreamStatus: number,
+  ): string | null {
+    if (!payload) {
+      return upstreamStatus >= 400 ? this.limitErrorText(rawText) : null;
+    }
+
+    const error = payload['error'];
+    if (error && typeof error === 'object') {
+      const message = (error as Record<string, unknown>)['message'];
+      if (typeof message === 'string' && message.trim().length > 0) {
+        return message;
+      }
+    }
+
+    const message = payload['message'];
+    if (upstreamStatus >= 400 && typeof message === 'string' && message.trim().length > 0) {
+      return message;
+    }
+
+    return upstreamStatus >= 400 ? this.limitErrorText(rawText) : null;
+  }
+
+  private extractThrownErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return error.message;
+    }
+    return '上游请求失败';
+  }
+
+  private toNonNegativeInt(value: unknown): number {
+    const parsed = Number(value ?? 0);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return 0;
+    }
+    return Math.trunc(parsed);
+  }
+
+  private limitErrorText(text: string): string | null {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return null;
+    }
+    return trimmed.slice(0, 500);
+  }
+
+  private async safeSettleMessage(
+    context: Parameters<BillingService['settleMessage']>[0],
+  ): Promise<void> {
+    try {
+      await this.billingService.settleMessage(context);
+    } catch (error) {
+      const message = this.extractThrownErrorMessage(error);
+      console.error(`[billing] 请求结算失败 userId=${context.userId}: ${message}`);
+    }
+  }
+
+  private async safeRefundMessageHold(
+    context: Parameters<BillingService['refundMessageHold']>[0],
+  ): Promise<void> {
+    try {
+      await this.billingService.refundMessageHold(context);
+    } catch (error) {
+      const message = this.extractThrownErrorMessage(error);
+      console.error(`[billing] 请求退款失败 userId=${context.userId}: ${message}`);
+    }
   }
 }
