@@ -1,4 +1,4 @@
-import { Injectable, NotImplementedException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import {
   ClaudeRequest,
   ClaudeResponse,
@@ -13,16 +13,16 @@ import {
 export class AnthropicAdapter implements ProviderAdapter {
   name = 'anthropic';
 
-  transformRequest(_req: ClaudeRequest): ProviderRequest {
-    throw new NotImplementedException('Anthropic adapter transformRequest not implemented');
+  transformRequest(req: ClaudeRequest): ProviderRequest {
+    return { ...req };
   }
 
-  transformResponse(_res: ProviderResponse): ClaudeResponse {
-    throw new NotImplementedException('Anthropic adapter transformResponse not implemented');
+  transformResponse(res: ProviderResponse): ClaudeResponse {
+    return res as ClaudeResponse;
   }
 
-  streamResponse(_res: ProviderStream): AsyncIterable<ClaudeStreamEvent> {
-    throw new NotImplementedException('Anthropic adapter streamResponse not implemented');
+  async *streamResponse(_res: ProviderStream): AsyncIterable<ClaudeStreamEvent> {
+    return;
   }
 
   async healthCheck(): Promise<boolean> {
@@ -31,5 +31,71 @@ export class AnthropicAdapter implements ProviderAdapter {
 
   supportedModels(): string[] {
     return [];
+  }
+
+  async forwardMessages(
+    request: ClaudeRequest,
+    incomingHeaders: Record<string, string | string[] | undefined>,
+  ): Promise<Response> {
+    const baseUrl = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(
+      /\/+$/,
+      '',
+    );
+
+    return fetch(`${baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: this.buildUpstreamHeaders(incomingHeaders),
+      body: JSON.stringify(this.transformRequest(request)),
+    });
+  }
+
+  async forwardCountTokens(
+    request: ProviderRequest,
+    incomingHeaders: Record<string, string | string[] | undefined>,
+  ): Promise<Response> {
+    const baseUrl = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(
+      /\/+$/,
+      '',
+    );
+
+    return fetch(`${baseUrl}/v1/messages/count_tokens`, {
+      method: 'POST',
+      headers: this.buildUpstreamHeaders(incomingHeaders),
+      body: JSON.stringify(request),
+    });
+  }
+
+  private buildUpstreamHeaders(incomingHeaders: Record<string, string | string[] | undefined>) {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new InternalServerErrorException('ANTHROPIC_API_KEY is not configured');
+    }
+
+    const headers: Record<string, string> = {
+      'x-api-key': apiKey,
+      'content-type': 'application/json',
+      'anthropic-version': this.readHeader(incomingHeaders, 'anthropic-version') || '2023-06-01',
+    };
+
+    const anthropicBeta = this.readHeader(incomingHeaders, 'anthropic-beta');
+    if (anthropicBeta) {
+      headers['anthropic-beta'] = anthropicBeta;
+    }
+
+    return headers;
+  }
+
+  private readHeader(
+    headers: Record<string, string | string[] | undefined>,
+    key: string,
+  ): string | undefined {
+    const value = headers[key];
+    if (typeof value === 'string') {
+      return value;
+    }
+    if (Array.isArray(value) && value.length > 0) {
+      return value[0];
+    }
+    return undefined;
   }
 }
