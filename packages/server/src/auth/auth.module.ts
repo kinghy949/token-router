@@ -7,12 +7,14 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 
+const jwtExpiresIn = (process.env.JWT_EXPIRES_IN || '7d') as any;
+
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'change-me',
-      signOptions: { expiresIn: Number(process.env.JWT_EXPIRES_IN_SECONDS || 604800) },
+      signOptions: { expiresIn: jwtExpiresIn },
     }),
   ],
   controllers: [AuthController, ApiKeysController],
