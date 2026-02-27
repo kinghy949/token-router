@@ -1,5 +1,9 @@
-import { Controller, Get, HttpCode } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { CurrentUser, CurrentUserPayload } from '../common/decorators/current-user.decorator';
+import { AdminGuard } from '../common/guards/admin.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { AdminService } from './admin.service';
+import { CreateRedeemCodesDto } from './dto/create-redeem-codes.dto';
 
 @Controller('admin')
 export class AdminController {
@@ -18,5 +22,11 @@ export class AdminController {
         },
       };
     }
+  }
+
+  @Post('redeem-codes')
+  @UseGuards(JwtAuthGuard, AdminGuard)
+  createRedeemCodes(@CurrentUser() user: CurrentUserPayload, @Body() dto: CreateRedeemCodesDto) {
+    return this.adminService.createRedeemCodes(user.userId, dto);
   }
 }

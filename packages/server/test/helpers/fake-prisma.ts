@@ -21,10 +21,14 @@ export class FakePrismaService {
   private users: any[] = [];
   private balances: any[] = [];
   private apiKeys: any[] = [];
+  private redeemCodes: any[] = [];
+  private transactions: any[] = [];
 
   user: any = {};
   balance: any = {};
   apiKey: any = {};
+  redeemCode: any = {};
+  transaction: any = {};
 
   constructor() {
     this.user.findUnique = async ({ where, select }: any) => {
@@ -70,6 +74,21 @@ export class FakePrismaService {
     this.balance.findUnique = async ({ where }: any) => {
       const balance = this.balances.find((b) => b.userId === where.userId);
       return balance ?? null;
+    };
+
+    this.balance.update = async ({ where, data }: any) => {
+      const idx = this.balances.findIndex((b) => b.userId === where.userId);
+      if (idx < 0) {
+        throw new Error('Balance not found');
+      }
+
+      const next = {
+        ...this.balances[idx],
+        ...data,
+        updatedAt: new Date(),
+      };
+      this.balances[idx] = next;
+      return next;
     };
 
     this.apiKey.create = async ({ data }: any) => {
@@ -123,6 +142,54 @@ export class FakePrismaService {
       }
 
       return apiKey;
+    };
+
+    this.redeemCode.findUnique = async ({ where }: any) => {
+      const code = this.redeemCodes.find((c) => c.code === where.code);
+      return code ?? null;
+    };
+
+    this.redeemCode.create = async ({ data }: any) => {
+      const created = {
+        code: data.code,
+        tokenAmount: data.tokenAmount,
+        createdBy: data.createdBy ?? null,
+        redeemedBy: data.redeemedBy ?? null,
+        redeemedAt: data.redeemedAt ?? null,
+        expiresAt: data.expiresAt ?? null,
+        createdAt: new Date(),
+      };
+      this.redeemCodes.push(created);
+      return created;
+    };
+
+    this.redeemCode.update = async ({ where, data }: any) => {
+      const idx = this.redeemCodes.findIndex((c) => c.code === where.code);
+      if (idx < 0) {
+        throw new Error('Redeem code not found');
+      }
+
+      const next = {
+        ...this.redeemCodes[idx],
+        ...data,
+      };
+      this.redeemCodes[idx] = next;
+      return next;
+    };
+
+    this.transaction.create = async ({ data }: any) => {
+      const item = {
+        id: randomUUID(),
+        userId: data.userId,
+        type: data.type,
+        amount: data.amount,
+        balanceAfter: data.balanceAfter,
+        refId: data.refId ?? null,
+        description: data.description ?? null,
+        createdAt: new Date(),
+      };
+      this.transactions.push(item);
+      return item;
     };
   }
 
