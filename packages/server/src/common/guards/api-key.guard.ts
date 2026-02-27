@@ -16,7 +16,7 @@ export class ApiKeyGuard implements CanActivate {
     const apiKey = this.extractApiKey(request);
 
     if (!apiKey) {
-      throw new UnauthorizedException('Invalid API key');
+      throw new UnauthorizedException('API Key 无效');
     }
 
     const keyHash = createHash('sha256').update(apiKey).digest('hex');
@@ -33,7 +33,7 @@ export class ApiKeyGuard implements CanActivate {
     });
 
     if (!record || !record.isActive || !record.user?.isActive) {
-      throw new UnauthorizedException('Invalid API key');
+      throw new UnauthorizedException('API Key 无效');
     }
 
     request.apiKeyContext = {

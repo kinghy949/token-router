@@ -68,7 +68,7 @@ export class AnthropicAdapter implements ProviderAdapter {
   private buildUpstreamHeaders(incomingHeaders: Record<string, string | string[] | undefined>) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
-      throw new InternalServerErrorException('ANTHROPIC_API_KEY is not configured');
+      throw new InternalServerErrorException('未配置 ANTHROPIC_API_KEY');
     }
 
     const headers: Record<string, string> = {

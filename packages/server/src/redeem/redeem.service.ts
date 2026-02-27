@@ -11,21 +11,21 @@ export class RedeemService {
     return this.prisma.$transaction(async (tx) => {
       const redeemCode = await tx.redeemCode.findUnique({ where: { code } });
       if (!redeemCode) {
-        throw new BadRequestException('Redeem code not found');
+        throw new BadRequestException('兑换码不存在');
       }
 
       if (redeemCode.redeemedAt) {
-        throw new BadRequestException('Redeem code already used');
+        throw new BadRequestException('兑换码已被使用');
       }
 
       const now = new Date();
       if (redeemCode.expiresAt && redeemCode.expiresAt.getTime() < now.getTime()) {
-        throw new BadRequestException('Redeem code expired');
+        throw new BadRequestException('兑换码已过期');
       }
 
       const balance = await tx.balance.findUnique({ where: { userId } });
       if (!balance) {
-        throw new BadRequestException('Balance account not found');
+        throw new BadRequestException('余额账户不存在');
       }
 
       const nextTokens = balance.tokens + redeemCode.tokenAmount;
@@ -50,7 +50,7 @@ export class RedeemService {
           amount: redeemCode.tokenAmount,
           balanceAfter: nextTokens,
           refId: null,
-          description: `Redeem code ${code}`,
+          description: `兑换码 ${code}`,
         },
       });
 

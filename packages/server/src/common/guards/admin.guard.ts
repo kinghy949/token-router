@@ -7,7 +7,7 @@ export class AdminGuard implements CanActivate {
     const user = request.user as { isAdmin?: boolean } | undefined;
 
     if (!user?.isAdmin) {
-      throw new ForbiddenException('Admin permission required');
+      throw new ForbiddenException('需要管理员权限');
     }
 
     return true;

@@ -8,7 +8,7 @@ export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
 
   async listUsers() {
-    throw new NotImplementedException('Admin users listing is not implemented yet');
+    throw new NotImplementedException('管理员用户列表功能暂未实现');
   }
 
   async createRedeemCodes(adminUserId: string, dto: CreateRedeemCodesDto) {
@@ -17,7 +17,7 @@ export class AdminService {
     if (dto.expiresAt) {
       const parsed = new Date(dto.expiresAt);
       if (Number.isNaN(parsed.getTime())) {
-        throw new BadRequestException('Invalid expiresAt');
+        throw new BadRequestException('expiresAt 格式无效');
       }
       expiresAt = parsed;
     }

@@ -23,7 +23,7 @@ export class BillingService {
         {
           error: {
             type: 'invalid_request_error',
-            message: 'max_tokens must be a positive number',
+            message: 'max_tokens 必须是正数',
           },
         },
         HttpStatus.BAD_REQUEST,
@@ -41,7 +41,7 @@ export class BillingService {
           {
             error: {
               type: 'balance_not_found_error',
-              message: 'Balance account not found',
+              message: '余额账户不存在',
             },
           },
           HttpStatus.BAD_REQUEST,
@@ -53,7 +53,7 @@ export class BillingService {
           {
             error: {
               type: 'insufficient_balance_error',
-              message: 'Insufficient balance',
+              message: '余额不足',
             },
           },
           HttpStatus.PAYMENT_REQUIRED,
@@ -73,7 +73,7 @@ export class BillingService {
           amount: -holdAmountBigInt,
           balanceAfter: nextTokens,
           refId: null,
-          description: `Precharge for /v1/messages, max_tokens=${maxTokens}`,
+          description: `请求 /v1/messages 预扣费，max_tokens=${maxTokens}`,
         },
       });
 

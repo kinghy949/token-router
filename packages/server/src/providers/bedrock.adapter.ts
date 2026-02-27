@@ -14,15 +14,15 @@ export class BedrockAdapter implements ProviderAdapter {
   name = 'bedrock';
 
   transformRequest(_req: ClaudeRequest): ProviderRequest {
-    throw new NotImplementedException('Bedrock adapter transformRequest not implemented');
+    throw new NotImplementedException('Bedrock 适配器 transformRequest 暂未实现');
   }
 
   transformResponse(_res: ProviderResponse): ClaudeResponse {
-    throw new NotImplementedException('Bedrock adapter transformResponse not implemented');
+    throw new NotImplementedException('Bedrock 适配器 transformResponse 暂未实现');
   }
 
   streamResponse(_res: ProviderStream): AsyncIterable<ClaudeStreamEvent> {
-    throw new NotImplementedException('Bedrock adapter streamResponse not implemented');
+    throw new NotImplementedException('Bedrock 适配器 streamResponse 暂未实现');
   }
 
   async healthCheck(): Promise<boolean> {

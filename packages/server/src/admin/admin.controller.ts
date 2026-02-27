@@ -18,7 +18,7 @@ export class AdminController {
       return {
         error: {
           type: 'not_implemented_error',
-          message: 'Admin module is not implemented yet',
+          message: '管理员模块暂未实现',
         },
       };
     }

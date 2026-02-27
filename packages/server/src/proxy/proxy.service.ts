@@ -16,7 +16,7 @@ export class ProxyService {
       if (error instanceof Error) {
         throw new BadGatewayException(error.message);
       }
-      throw new BadGatewayException('Upstream provider request failed');
+      throw new BadGatewayException('上游服务请求失败');
     }
   }
 
@@ -30,7 +30,7 @@ export class ProxyService {
       if (error instanceof Error) {
         throw new BadGatewayException(error.message);
       }
-      throw new BadGatewayException('Upstream provider request failed');
+      throw new BadGatewayException('上游服务请求失败');
     }
   }
 }

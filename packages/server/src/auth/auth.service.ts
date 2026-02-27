@@ -16,7 +16,7 @@ export class AuthService {
     const email = dto.email.toLowerCase().trim();
     const exists = await this.prisma.user.findUnique({ where: { email } });
     if (exists) {
-      throw new UnauthorizedException('Email already exists');
+      throw new UnauthorizedException('邮箱已存在');
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
@@ -66,7 +66,7 @@ export class AuthService {
   async login(dto: LoginDto) {
     const user = await this.validateUser(dto.email, dto.password);
     if (!user) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('邮箱或密码错误');
     }
 
     return {
@@ -92,7 +92,7 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('User not found');
+      throw new UnauthorizedException('用户不存在');
     }
 
     return user;

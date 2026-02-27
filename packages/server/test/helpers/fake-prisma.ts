@@ -79,7 +79,7 @@ export class FakePrismaService {
     this.balance.update = async ({ where, data }: any) => {
       const idx = this.balances.findIndex((b) => b.userId === where.userId);
       if (idx < 0) {
-        throw new Error('Balance not found');
+        throw new Error('余额不存在');
       }
 
       const next = {
@@ -166,7 +166,7 @@ export class FakePrismaService {
     this.redeemCode.update = async ({ where, data }: any) => {
       const idx = this.redeemCodes.findIndex((c) => c.code === where.code);
       if (idx < 0) {
-        throw new Error('Redeem code not found');
+        throw new Error('兑换码不存在');
       }
 
       const next = {
