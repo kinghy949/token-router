@@ -46,6 +46,8 @@ pnpm prisma:generate
 - `JWT_EXPIRES_IN`：JWT 过期时间（示例：`7d`）
 - `ANTHROPIC_API_KEY`：上游 Anthropic API Key
 - `ANTHROPIC_BASE_URL`：上游基地址（默认 `https://api.anthropic.com`）
+- `INPUT_TOKEN_PRICE`：input token 每 1K 的扣费额度
+- `OUTPUT_TOKEN_PRICE`：output token 每 1K 的扣费额度
 
 ## 首批已实现接口
 
@@ -70,4 +72,5 @@ pnpm prisma:generate
 - API Key 明文仅在创建时返回一次，数据库仅存储哈希。
 - 兑换码格式为 `TR-<16位大写字母数字>`，同一兑换码仅可使用一次。
 - 兑换成功后会增加余额，并写入 `transactions` 账本记录（`type=redeem`）。
+- `/v1/messages` 当前会在转发前做预扣费（余额不足返回 `402`），完整实结与退款在下一里程碑实现。
 - 代理当前仅接入 Anthropic 直通，Bedrock/Vertex 与完整计费联动在下一里程碑实现。

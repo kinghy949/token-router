@@ -1,20 +1,27 @@
 import { Body, Controller, Headers, Post, Res, UseGuards } from '@nestjs/common';
 import type { Response as ExpressResponse } from 'express';
+import { CurrentApiKey } from '../common/decorators/current-api-key.decorator';
 import { ApiKeyGuard } from '../common/guards/api-key.guard';
+import { BillingService } from '../billing/billing.service';
 import { ClaudeRequest, ProviderRequest } from '../providers/provider-adapter.interface';
 import { ProxyService } from './proxy.service';
 
 @Controller('v1')
 export class ProxyController {
-  constructor(private readonly proxyService: ProxyService) {}
+  constructor(
+    private readonly proxyService: ProxyService,
+    private readonly billingService: BillingService,
+  ) {}
 
   @Post('messages')
   @UseGuards(ApiKeyGuard)
   async forwardMessage(
+    @CurrentApiKey() apiKeyCtx: { userId: string; apiKeyId: string },
     @Body() body: ClaudeRequest,
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Res() response: ExpressResponse,
   ) {
+    await this.billingService.reserveForMessage(apiKeyCtx.userId, body);
     const upstreamResponse = await this.proxyService.forwardMessage(body, headers);
     await this.writeUpstreamResponse(upstreamResponse, response);
   }
