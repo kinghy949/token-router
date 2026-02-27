@@ -18,6 +18,8 @@ model User {
   apiKeys      ApiKey[]
   balance      Balance?
   transactions Transaction[]
+  createdCodes RedeemCode[]  @relation("RedeemCodeCreatedBy")
+  redeemedCodes RedeemCode[] @relation("RedeemCodeRedeemedBy")
 
   @@map("users")
 }
@@ -61,4 +63,18 @@ model Transaction {
   @@index([userId], map: "idx_transactions_user_id")
   @@index([createdAt], map: "idx_transactions_created_at")
   @@map("transactions")
+}
+
+model RedeemCode {
+  code           String    @id @db.VarChar(50)
+  tokenAmount    BigInt    @map("token_amount")
+  createdBy      String?   @map("created_by") @db.Char(36)
+  redeemedBy     String?   @map("redeemed_by") @db.Char(36)
+  redeemedAt     DateTime? @map("redeemed_at")
+  expiresAt      DateTime? @map("expires_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  createdByUser  User?     @relation("RedeemCodeCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull)
+  redeemedByUser User?     @relation("RedeemCodeRedeemedBy", fields: [redeemedBy], references: [id], onDelete: SetNull)
+
+  @@map("redeem_codes")
 }
