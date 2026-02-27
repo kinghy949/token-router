@@ -54,14 +54,17 @@ pnpm prisma:generate
 - `POST /api-keys`
 - `GET /api-keys`
 - `GET /balance`
+- `POST /admin/redeem-codes`（需管理员 JWT）
+- `POST /redeem`（用户兑换）
 
 ## 已创建但暂未实现（返回 501）
 
 - `POST /v1/messages`
-- `POST /redeem`
 - `GET /admin/users`
 
 ## 说明
 
 - API Key 明文仅在创建时返回一次，数据库仅存储哈希。
+- 兑换码格式为 `TR-<16位大写字母数字>`，同一兑换码仅可使用一次。
+- 兑换成功后会增加余额，并写入 `transactions` 账本记录（`type=redeem`）。
 - 代理、多上游调度、兑换码核销、完整计费在下一里程碑实现。
