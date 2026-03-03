@@ -39,6 +39,10 @@ describe('Redeem (e2e)', () => {
     await app.close();
   });
 
+  afterEach(() => {
+    delete process.env.REDEEM_RATE_LIMIT_PER_MINUTE;
+  });
+
   it('admin creates redeem code and user redeems once', async () => {
     const userToken = await registerAndLogin(app, 'redeem-user@test.com');
 
@@ -76,5 +80,38 @@ describe('Redeem (e2e)', () => {
       .set('Authorization', `Bearer ${userToken}`)
       .send({ code })
       .expect(400);
+  });
+
+  it('returns 429 when redeem rate limit is exceeded', async () => {
+    process.env.REDEEM_RATE_LIMIT_PER_MINUTE = '1';
+    const userToken = await registerAndLogin(app, 'redeem-rate-user@test.com');
+
+    const jwtService = app.get(JwtService);
+    const adminToken = jwtService.sign({
+      sub: 'admin-redeem-rate',
+      email: 'admin-redeem-rate@test.com',
+      isAdmin: true,
+    });
+
+    const created = await request(app.getHttpServer())
+      .post('/admin/redeem-codes')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ tokenAmount: 1000, count: 2 })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/redeem')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ code: created.body.items[0].code })
+      .expect(201);
+
+    const limited = await request(app.getHttpServer())
+      .post('/redeem')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ code: created.body.items[1].code })
+      .expect(429);
+
+    expect(limited.body.error.type).toBe('rate_limit_error');
+    expect(typeof limited.body.error.message).toBe('string');
   });
 });

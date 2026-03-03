@@ -5,11 +5,15 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { createHash } from 'crypto';
+import { RateLimitService } from '../rate-limit/rate-limit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rateLimitService: RateLimitService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -36,6 +40,9 @@ export class ApiKeyGuard implements CanActivate {
       throw new UnauthorizedException('API Key 无效');
     }
 
+    const limit = this.readRateLimitPerMinute();
+    await this.rateLimitService.assertWithinLimit('api_key', record.id, limit);
+
     request.apiKeyContext = {
       userId: record.userId,
       apiKeyId: record.id,
@@ -59,5 +66,13 @@ export class ApiKeyGuard implements CanActivate {
     }
 
     return null;
+  }
+
+  private readRateLimitPerMinute() {
+    const raw = Number(process.env.RATE_LIMIT_PER_MINUTE ?? 60);
+    if (!Number.isFinite(raw) || raw <= 0) {
+      return 60;
+    }
+    return Math.trunc(raw);
   }
 }

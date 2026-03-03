@@ -47,6 +47,52 @@ export class FakePrismaService {
       return user ? applySelect(user, select) : null;
     };
 
+    this.user.findMany = async ({ where, orderBy, skip, take, select }: any = {}) => {
+      let list = this.users.filter((u) => {
+        if (where?.id?.in && !where.id.in.includes(u.id)) {
+          return false;
+        }
+        if (where?.isAdmin !== undefined && u.isAdmin !== where.isAdmin) {
+          return false;
+        }
+        if (where?.email?.contains) {
+          const keyword = String(where.email.contains).toLowerCase();
+          if (!String(u.email).toLowerCase().includes(keyword)) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      if (orderBy?.createdAt === 'desc') {
+        list = list.sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
+      } else if (orderBy?.createdAt === 'asc') {
+        list = list.sort((a, b) => Number(a.createdAt) - Number(b.createdAt));
+      }
+
+      const start = Number(skip ?? 0);
+      const end = take !== undefined ? start + Number(take) : undefined;
+      return list.slice(start, end).map((item) => applySelect(item, select));
+    };
+
+    this.user.count = async ({ where }: any = {}) => {
+      return this.users.filter((u) => {
+        if (where?.id?.in && !where.id.in.includes(u.id)) {
+          return false;
+        }
+        if (where?.isAdmin !== undefined && u.isAdmin !== where.isAdmin) {
+          return false;
+        }
+        if (where?.email?.contains) {
+          const keyword = String(where.email.contains).toLowerCase();
+          if (!String(u.email).toLowerCase().includes(keyword)) {
+            return false;
+          }
+        }
+        return true;
+      }).length;
+    };
+
     this.user.create = async ({ data }: any) => {
       const now = new Date();
       const user = {
@@ -91,6 +137,14 @@ export class FakePrismaService {
     this.balance.findUnique = async ({ where }: any) => {
       const balance = this.balances.find((b) => b.userId === where.userId);
       return balance ?? null;
+    };
+
+    this.balance.findMany = async ({ where, select }: any = {}) => {
+      let list = this.balances;
+      if (where?.userId?.in) {
+        list = list.filter((item) => where.userId.in.includes(item.userId));
+      }
+      return list.map((item) => applySelect(item, select));
     };
 
     this.balance.update = async ({ where, data }: any) => {
@@ -159,6 +213,18 @@ export class FakePrismaService {
       }
 
       return apiKey;
+    };
+
+    this.apiKey.count = async ({ where }: any = {}) => {
+      return this.apiKeys.filter((item) => {
+        if (where?.isActive !== undefined && item.isActive !== where.isActive) {
+          return false;
+        }
+        if (where?.userId && item.userId !== where.userId) {
+          return false;
+        }
+        return true;
+      }).length;
     };
 
     this.apiKey.update = async ({ where, data, select }: any) => {
@@ -311,9 +377,13 @@ export class FakePrismaService {
       return item;
     };
 
-    this.usageLog.findMany = async ({ where, orderBy, skip, take, select }: any) => {
+    this.usageLog.findMany = async ({ where, orderBy, skip, take, select }: any = {}) => {
       let list = this.usageLogs.filter((item) => {
-        if (where?.userId && item.userId !== where.userId) {
+        if (where?.userId && typeof where.userId === 'string' && item.userId !== where.userId) {
+          return false;
+        }
+
+        if (where?.userId?.in && !where.userId.in.includes(item.userId)) {
           return false;
         }
 
@@ -342,9 +412,12 @@ export class FakePrismaService {
       return paged.map((item) => applySelect(item, select));
     };
 
-    this.usageLog.count = async ({ where }: any) => {
+    this.usageLog.count = async ({ where }: any = {}) => {
       return this.usageLogs.filter((item) => {
-        if (where?.userId && item.userId !== where.userId) {
+        if (where?.userId && typeof where.userId === 'string' && item.userId !== where.userId) {
+          return false;
+        }
+        if (where?.userId?.in && !where.userId.in.includes(item.userId)) {
           return false;
         }
         if (where?.model && item.model !== where.model) {

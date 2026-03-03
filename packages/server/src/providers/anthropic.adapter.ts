@@ -26,11 +26,18 @@ export class AnthropicAdapter implements ProviderAdapter {
   }
 
   async healthCheck(): Promise<boolean> {
-    return false;
+    return Boolean(process.env.ANTHROPIC_API_KEY);
   }
 
   supportedModels(): string[] {
-    return [];
+    const configured = process.env.ANTHROPIC_SUPPORTED_MODELS;
+    if (!configured) {
+      return [];
+    }
+    return configured
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
   }
 
   async forwardMessages(

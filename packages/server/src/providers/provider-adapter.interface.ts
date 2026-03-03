@@ -39,4 +39,12 @@ export interface ProviderAdapter {
   streamResponse(res: ProviderStream): AsyncIterable<ClaudeStreamEvent>;
   healthCheck(): Promise<boolean>;
   supportedModels(): string[];
+  forwardMessages(
+    request: ClaudeRequest,
+    incomingHeaders: Record<string, string | string[] | undefined>,
+  ): Promise<Response>;
+  forwardCountTokens(
+    request: ProviderRequest,
+    incomingHeaders: Record<string, string | string[] | undefined>,
+  ): Promise<Response>;
 }

@@ -1,11 +1,18 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { RateLimitService } from '../common/rate-limit/rate-limit.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class RedeemService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly rateLimitService: RateLimitService,
+  ) {}
 
   async redeemCode(userId: string, rawCode: string) {
+    const limit = this.readRedeemRateLimitPerMinute();
+    await this.rateLimitService.assertWithinLimit('redeem', userId, limit);
+
     const code = rawCode.trim().toUpperCase();
 
     return this.prisma.$transaction(async (tx) => {
@@ -63,5 +70,13 @@ export class RedeemService {
         },
       };
     });
+  }
+
+  private readRedeemRateLimitPerMinute() {
+    const raw = Number(process.env.REDEEM_RATE_LIMIT_PER_MINUTE ?? 5);
+    if (!Number.isFinite(raw) || raw <= 0) {
+      return 5;
+    }
+    return Math.trunc(raw);
   }
 }

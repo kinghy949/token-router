@@ -3,7 +3,12 @@
   "private": true,
   "packageManager": "pnpm@10.5.2",
   "scripts": {
+    "dev:server": "pnpm -C packages/server start:dev",
+    "dev:web": "pnpm -C packages/web dev",
     "build": "pnpm -r build",
-    "test": "pnpm -r test"
+    "build:server": "pnpm -C packages/server build",
+    "build:web": "pnpm -C packages/web build",
+    "test": "pnpm -r test",
+    "test:e2e:server": "pnpm -C packages/server test:e2e"
   }
 }

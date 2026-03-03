@@ -100,4 +100,13 @@ export class ApiKeyService {
 
     await this.prisma.apiKey.delete({ where: { id } });
   }
+
+  async touchLastUsedAt(id: string) {
+    await this.prisma.apiKey.update({
+      where: { id },
+      data: {
+        lastUsedAt: new Date(),
+      },
+    });
+  }
 }

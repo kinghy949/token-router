@@ -1,0 +1,93 @@
+services:
+  db:
+    image: mysql:8.4
+    container_name: token-router-db
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-token_router}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-password}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: token-router-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      dockerfile: packages/server/Dockerfile
+    container_name: token-router-server
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${SERVER_PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DATABASE_URL: mysql://root:${MYSQL_ROOT_PASSWORD:-password}@db:3306/${MYSQL_DATABASE:-token_router}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:-change-me}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      INPUT_TOKEN_PRICE: ${INPUT_TOKEN_PRICE:-1}
+      OUTPUT_TOKEN_PRICE: ${OUTPUT_TOKEN_PRICE:-5}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
+      REDEEM_RATE_LIMIT_PER_MINUTE: ${REDEEM_RATE_LIMIT_PER_MINUTE:-5}
+      REQUEST_BODY_LIMIT: ${REQUEST_BODY_LIMIT:-10mb}
+      WEB_URL: ${WEB_URL:-http://localhost:8080}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      PROVIDER_PRIORITY: ${PROVIDER_PRIORITY:-anthropic,bedrock,vertex}
+      PROXY_MAX_FAILOVER: ${PROXY_MAX_FAILOVER:-3}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-please}
+      BEDROCK_BASE_URL: ${BEDROCK_BASE_URL:-}
+      BEDROCK_API_KEY: ${BEDROCK_API_KEY:-}
+      VERTEX_BASE_URL: ${VERTEX_BASE_URL:-}
+      VERTEX_API_KEY: ${VERTEX_API_KEY:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: token-router-web
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+  redis_data:

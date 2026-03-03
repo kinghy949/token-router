@@ -27,7 +27,9 @@ describe('ApiKeyGuard', () => {
       },
     } as any;
 
-    const guard = new ApiKeyGuard(prisma);
+    const guard = new ApiKeyGuard(prisma, {
+      assertWithinLimit: jest.fn().mockResolvedValue(undefined),
+    } as any);
     const context = createExecutionContext({ 'x-api-key': rawKey });
 
     const ok = await guard.canActivate(context);
@@ -38,7 +40,10 @@ describe('ApiKeyGuard', () => {
   });
 
   it('rejects when key is missing', async () => {
-    const guard = new ApiKeyGuard({ apiKey: { findUnique: jest.fn() } } as any);
+    const guard = new ApiKeyGuard(
+      { apiKey: { findUnique: jest.fn() } } as any,
+      { assertWithinLimit: jest.fn().mockResolvedValue(undefined) } as any,
+    );
 
     await expect(guard.canActivate(createExecutionContext({}))).rejects.toBeInstanceOf(
       UnauthorizedException,

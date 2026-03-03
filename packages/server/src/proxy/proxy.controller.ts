@@ -1,9 +1,12 @@
-import { Body, Controller, Headers, Post, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Headers, Post, Res, UseFilters, UseGuards } from '@nestjs/common';
 import type { Response as ExpressResponse } from 'express';
+import { ApiKeyService } from '../auth/api-key.service';
 import { CurrentApiKey } from '../common/decorators/current-api-key.decorator';
 import { ApiKeyGuard } from '../common/guards/api-key.guard';
+import { sanitizeTextForLog } from '../common/logging/log-sanitizer.util';
 import { BillingService, MessageUsage } from '../billing/billing.service';
 import { ClaudeRequest, ProviderRequest } from '../providers/provider-adapter.interface';
+import { ProxyExceptionFilter } from './proxy-exception.filter';
 import { ProxyService } from './proxy.service';
 
 interface UpstreamWriteResult {
@@ -13,10 +16,12 @@ interface UpstreamWriteResult {
 }
 
 @Controller('v1')
+@UseFilters(ProxyExceptionFilter)
 export class ProxyController {
   constructor(
     private readonly proxyService: ProxyService,
     private readonly billingService: BillingService,
+    private readonly apiKeyService: ApiKeyService,
   ) {}
 
   @Post('messages')
@@ -28,22 +33,27 @@ export class ProxyController {
     @Res() response: ExpressResponse,
   ) {
     const startedAt = Date.now();
+    await this.touchApiKeyLastUsedAt(apiKeyCtx.apiKeyId);
     const hold = await this.billingService.reserveForMessage(apiKeyCtx.userId, body);
+    let selectedProvider = 'anthropic';
     const settlementBase = {
       userId: apiKeyCtx.userId,
       apiKeyId: apiKeyCtx.apiKeyId,
       model: typeof body.model === 'string' && body.model.trim().length > 0 ? body.model : 'unknown',
-      provider: 'anthropic',
+      provider: selectedProvider,
       holdAmount: hold.holdAmount,
       durationMs: Date.now() - startedAt,
     };
 
-    let upstreamResponse: Response;
+    let upstreamResponse: globalThis.Response;
     try {
-      upstreamResponse = await this.proxyService.forwardMessage(body, headers);
+      const result = await this.proxyService.forwardMessage(body, headers);
+      selectedProvider = result.provider;
+      upstreamResponse = result.response;
     } catch (error) {
       await this.safeRefundMessageHold({
         ...settlementBase,
+        provider: selectedProvider,
         upstreamStatus: null,
         errorMessage: this.extractThrownErrorMessage(error),
       });
@@ -56,6 +66,7 @@ export class ProxyController {
     } catch (error) {
       await this.safeRefundMessageHold({
         ...settlementBase,
+        provider: selectedProvider,
         upstreamStatus: upstreamResponse.status,
         errorMessage: this.extractThrownErrorMessage(error),
       });
@@ -64,6 +75,7 @@ export class ProxyController {
 
     await this.safeSettleMessage({
       ...settlementBase,
+      provider: selectedProvider,
       usage: writeResult.usage,
       upstreamStatus: writeResult.upstreamStatus,
       errorMessage: writeResult.errorMessage,
@@ -74,12 +86,14 @@ export class ProxyController {
   @Post('messages/count_tokens')
   @UseGuards(ApiKeyGuard)
   async countTokens(
+    @CurrentApiKey() apiKeyCtx: { userId: string; apiKeyId: string },
     @Body() body: ProviderRequest,
     @Headers() headers: Record<string, string | string[] | undefined>,
     @Res() response: ExpressResponse,
   ) {
-    const upstreamResponse = await this.proxyService.forwardCountTokens(body, headers);
-    await this.writeUpstreamResponse(upstreamResponse, response);
+    await this.touchApiKeyLastUsedAt(apiKeyCtx.apiKeyId);
+    const result = await this.proxyService.forwardCountTokens(body, headers);
+    await this.writeUpstreamResponse(result.response, response);
   }
 
   private async writeUpstreamResponse(
@@ -128,19 +142,25 @@ export class ProxyController {
 
     const text = await upstreamResponse.text();
     const parsedPayload = this.tryParseJson(text);
-    if (contentType.includes('application/json')) {
-      if (parsedPayload !== null) {
-        response.send(parsedPayload);
-      } else {
-        response.send(text);
-      }
+    const normalizedError =
+      upstreamResponse.status >= 400
+        ? this.normalizeUpstreamError(parsedPayload, text, upstreamResponse.status)
+        : null;
+
+    if (normalizedError) {
+      response.setHeader('content-type', 'application/json; charset=utf-8');
+      response.send(normalizedError);
+    } else if (contentType.includes('application/json')) {
+      response.send(parsedPayload !== null ? parsedPayload : text);
     } else {
       response.send(text);
     }
 
     return {
       usage: this.extractUsageFromPayload(parsedPayload),
-      errorMessage: this.extractErrorMessageFromPayload(parsedPayload, text, upstreamResponse.status),
+      errorMessage:
+        normalizedError?.error.message ??
+        this.extractErrorMessageFromPayload(parsedPayload, text, upstreamResponse.status),
       upstreamStatus: upstreamResponse.status,
     };
   }
@@ -284,9 +304,33 @@ export class ProxyController {
 
   private extractThrownErrorMessage(error: unknown): string {
     if (error instanceof Error && error.message.trim().length > 0) {
-      return error.message;
+      return sanitizeTextForLog(error.message);
     }
     return '上游请求失败';
+  }
+
+  private normalizeUpstreamError(
+    payload: Record<string, unknown> | null,
+    rawText: string,
+    upstreamStatus: number,
+  ) {
+    const errorMessage =
+      this.extractErrorMessageFromPayload(payload, rawText, upstreamStatus) || '上游请求失败';
+    let errorType = 'api_error';
+
+    if (payload?.['error'] && typeof payload['error'] === 'object') {
+      const type = (payload['error'] as Record<string, unknown>)['type'];
+      if (typeof type === 'string' && type.trim().length > 0) {
+        errorType = type;
+      }
+    }
+
+    return {
+      error: {
+        type: errorType,
+        message: errorMessage,
+      },
+    };
   }
 
   private toNonNegativeInt(value: unknown): number {
@@ -302,7 +346,7 @@ export class ProxyController {
     if (!trimmed) {
       return null;
     }
-    return trimmed.slice(0, 500);
+    return sanitizeTextForLog(trimmed.slice(0, 500));
   }
 
   private async safeSettleMessage(
@@ -324,6 +368,15 @@ export class ProxyController {
     } catch (error) {
       const message = this.extractThrownErrorMessage(error);
       console.error(`[billing] 请求退款失败 userId=${context.userId}: ${message}`);
+    }
+  }
+
+  private async touchApiKeyLastUsedAt(apiKeyId: string) {
+    try {
+      await this.apiKeyService.touchLastUsedAt(apiKeyId);
+    } catch (error) {
+      const message = this.extractThrownErrorMessage(error);
+      console.error(`[apikey] 更新 last_used_at 失败 apiKeyId=${apiKeyId}: ${message}`);
     }
   }
 }
